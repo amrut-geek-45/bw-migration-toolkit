@@ -1,39 +1,55 @@
-import google.generativeai as genai
-from ztable_lookup import get_ztable_info
+import requests
 import os
+from ztable_lookup import get_ztable_info
 
 
-MODEL_NAME = "gemini-3-flash-preview"
+# ----------------------------------------
+# Claude API caller
+# ----------------------------------------
 
-genai.configure(api_key='AIzaSyCbhOydDIETBWhRSYnBQ2ibXYyujP5w6j8')
+def _call_claude(prompt, max_tokens=1000):
+    """Call Claude Sonnet via Anthropic API."""
+    try:
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            try:
+                import streamlit as st
+                api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+            except Exception:
+                pass
 
-model = genai.GenerativeModel(MODEL_NAME)
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            json={
+                "model": "claude-sonnet-4-6",
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=60,
+        )
+        data = response.json()
+        return "".join(
+            b.get("text", "") for b in data.get("content", [])
+        )
+    except Exception as e:
+        return f"[ERROR] Claude API call failed: {e}"
 
 
-def generate_reason(
-    code,
-    complexity,
-    score
-):
+# ----------------------------------------
+# Complexity explanation (with Z tables)
+# ----------------------------------------
 
-    # ------------------------------------
-    # Detect Z tables from CSV
-    # ------------------------------------
+def generate_reason(code, complexity, score):
 
-    ztable_details = get_ztable_info(
-        code
-    )
+    ztable_details = get_ztable_info(code)
 
     if ztable_details:
-
-        ztable_text = "\n".join([
-
-            item["table"]
-
-            for item in ztable_details
-
-        ])
-
+        ztable_text = "\n".join([item["table"] for item in ztable_details])
         ztable_section = f"""
 
 4. Are there any custom Z tables present in the logic?
@@ -43,9 +59,7 @@ YES
 {ztable_text}
 
 """
-
     else:
-
         ztable_section = """
 
 4. Are there any custom Z tables present in the logic?
@@ -56,7 +70,7 @@ No custom Z tables found
 
 """
 
-    prompt = f'''
+    prompt = f"""
 You are an SAP BW ABAP expert.
 
 Analyze the following BW routine code.
@@ -76,42 +90,25 @@ Keep the answer concise.
 Code:
 
 {code[:6000]}
-'''
+"""
 
-    response = client.models.generate_content(
-
-        model=MODEL_NAME,
-
-        contents=prompt
-
-    )
-
-    return response.text + ztable_section
+    return _call_claude(prompt, max_tokens=800) + ztable_section
 
 
-def generate_functional_overview(
-    code,
-    transformation_summary=None
-):
+# ----------------------------------------
+# Functional overview
+# ----------------------------------------
+
+def generate_functional_overview(code, transformation_summary=None):
 
     summary_text = ""
-
     if transformation_summary is not None:
-
         try:
-
-            summary_text = (
-
-                transformation_summary
-                .to_string()
-
-            )
-
-        except:
-
+            summary_text = transformation_summary.to_string()
+        except Exception:
             summary_text = ""
 
-    prompt = f'''
+    prompt = f"""
 You are an SAP BW Functional Consultant.
 
 Explain this transformation
@@ -132,14 +129,6 @@ Transformation metadata:
 Transformation code:
 
 {code[:6000]}
-'''
+"""
 
-    response = client.models.generate_content(
-
-        model=MODEL_NAME,
-
-        contents=prompt
-
-    )
-
-    return response.text
+    return _call_claude(prompt, max_tokens=400)
