@@ -1,29 +1,51 @@
-import google.generativeai as genai
-import re
+import requests
+import os
 
-genai.configure(
-    api_key=' AIzaSyD4bkU4Lry5bZxettHOHw_gRJ45MsfCBWQ'
-)
+# ----------------------------------------
+# Claude API caller
+# ----------------------------------------
 
-MODEL_NAME = "gemini-3-flash-preview"
+def _call_claude(prompt, max_tokens=1000):
+    """Call Claude Sonnet via Anthropic API."""
+    try:
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        # Try streamlit secrets if available
+        if not api_key:
+            try:
+                import streamlit as st
+                api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+            except Exception:
+                pass
 
-model = genai.GenerativeModel(
-    MODEL_NAME
-)
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            json={
+                "model": "claude-sonnet-4-6",
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=60,
+        )
+        data = response.json()
+        return "".join(
+            b.get("text", "") for b in data.get("content", [])
+        )
+    except Exception as e:
+        return f"[ERROR] Claude API call failed: {e}"
 
 
 # ----------------------------------------
 # Complexity explanation
 # ----------------------------------------
 
-def generate_reason(
-    code,
-    complexity,
-    score
-):
+def generate_reason(code, complexity, score):
 
     prompt = f"""
-
 You are an SAP BW ABAP expert.
 
 Analyze this BW transformation code.
@@ -45,26 +67,17 @@ Keep concise.
 Code:
 
 {code[:6000]}
-
 """
-
-    response = model.generate_content(
-        prompt
-    )
-
-    return response.text
+    return _call_claude(prompt, max_tokens=800)
 
 
 # ----------------------------------------
 # Functional overview
 # ----------------------------------------
 
-def generate_functional_overview(
-    code
-):
+def generate_functional_overview(code):
 
     prompt = f"""
-
 You are an SAP BW Functional Consultant.
 
 Explain in 3-5 lines:
@@ -75,34 +88,22 @@ in business language.
 Code:
 
 {code[:6000]}
-
 """
-
-    response = model.generate_content(
-        prompt
-    )
-
-    return response.text
+    return _call_claude(prompt, max_tokens=400)
 
 
 # ----------------------------------------
 # Z table overview
 # ----------------------------------------
 
-def generate_ztable_overview(
-    ztable_details
-):
+def generate_ztable_overview(ztable_details):
 
     if not ztable_details:
-
         return ""
 
-    text=""
-
+    text = ""
     for table in ztable_details:
-
         text += f"""
-
 Table:
 {table["table"]}
 
@@ -111,11 +112,9 @@ Description:
 
 Fields:
 {table["overview"]}
-
 """
 
-    prompt=f"""
-
+    prompt = f"""
 You are an SAP BW Architect.
 
 Analyze these custom tables.
@@ -145,11 +144,5 @@ Characteristics:
 Input:
 
 {text}
-
 """
-
-    response=model.generate_content(
-        prompt
-    )
-
-    return response.text
+    return _call_claude(prompt, max_tokens=800)
